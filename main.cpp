@@ -1,8 +1,12 @@
 #include <SFML/Graphics.hpp>
+#include <iostream>
 #include "chip8.h"
+typedef uint8_t u8;
+typedef uint16_t u16;
 using namespace sf;
+using namespace std;
 
-Keyboard::Key keys[] = {
+Keyboard::Key key[] = {
     Keyboard::X,
     Keyboard::Num1,
     Keyboard::Num2,
@@ -22,55 +26,60 @@ Keyboard::Key keys[] = {
 };
 
 int main(){
-    //string fileName;
-    //cin >> fileName;
+    cout << "Enter file name: \n";
+    string file;
+    cin >> file;
 
-    RenderWindow window(VideoMode(640, 320), "Chip 8", Style::Titlebar | Style::Close);
-    Chip8 chip8;
-    uint8_t* color = new uint8_t[2048 * 4];
-    chip8.init("C:\\Users\\Egor\\Downloads\\c8games\\PONG");
+	RenderWindow window(VideoMode(640, 320), "Chip8");
+
+	Chip8 chip8;
+    chip8.init(file);
+
+    //u8 color[64 * 32 * 4] = {0};
     Texture gfx;
     gfx.create(64, 32);
     Sprite display(gfx);
-    display.setScale(Vector2f(10, 10));
-    Clock clock;
-    int time;
+    display.setScale(10.0, 10.0);
 
-    while(window.isOpen()){
+	while(window.isOpen()){
         Event e;
-
-        time = clock.getElapsedTime().asMilliseconds();
-        if(time % (int)(1000.0f / 60.0f) == 0)
-        chip8.cycle();
+        chip8.exec();
 
         while(window.pollEvent(e)){
             if(e.type == Event::Closed) window.close();
             else if(e.type == Event::KeyPressed){
                 for(int i = 0; i < 16; i++){
-                    if(e.key.code == keys[i]) chip8.key[i] = 1;
+                    if(e.key.code == key[i]) chip8.keys[i] = 1;
                 }
             }
             else if(e.type == Event::KeyReleased){
                 for(int i = 0; i < 16; i++){
-                    if(e.key.code == keys[i]) chip8.key[i] = 0;
+                    if(e.key.code == key[i]) chip8.keys[i] = 0;
                 }
             }
         }
 
         if(chip8.drawFlag){
-            for(int i = 0; i < 2048; i++){
-                int j = i * 4;
-                color[j] = color[j + 1] = color[j + 2] = chip8.vmem[i] * 0xFF;
-                color[j + 3] = 0xFF;
-            }
-            gfx.update(color, 64, 32, 0, 0);
             chip8.drawFlag = false;
+
+            Uint8* color = new Uint8[64 * 32 * 4];
+            for(int i = 0; i < 64 * 32; i++){
+                int j = i * 4;
+                u8 pixel = chip8.gfx[i];
+                color[j] = pixel * 255;
+                color[j + 1] = color[j + 2] = pixel * 255;
+                color[j + 3] = 255;
+            }
+            gfx.update(color);
+            delete[] color;
         }
 
         window.clear();
         window.draw(display);
         window.display();
-    }
 
-    return 0;
+        sleep(microseconds(1200));
+	}
+
+	return 0;
 }

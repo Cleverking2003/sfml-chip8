@@ -1,6 +1,6 @@
 #include "chip8.h"
 
-uint8_t font[] = {
+u8 font[] = {
     0xf0, 0x90, 0x90, 0x90, 0xf0, //0
     0x20, 0x60, 0x20, 0x20, 0x70, //1
     0xf0, 0x10, 0xf0, 0x80, 0xf0, //2
@@ -16,243 +16,282 @@ uint8_t font[] = {
     0xf0, 0x80, 0x80, 0x80, 0xf0, //C
     0xe0, 0x90, 0x90, 0x90, 0xe0, //D
     0xf0, 0x80, 0xf0, 0x80, 0xf0, //E
-    0xf0, 0x80, 0xf0, 0x80, 0x80 //F
+    0xf0, 0x80, 0xf0, 0x80, 0x80  //F
 };
 
-Chip8::Chip8(){} //Nothing to do here
+Chip8::Chip8(){}
 
-//Init chip 8
-void Chip8::init(string fileName){
-    i = 0;
-    sp = 15;
-    pc = 0x200;
-    dt = st = 0;
-    srand(time(NULL));
-
-    for(uint8_t c : vmem){
-        c = 0;
+void Chip8::init(string file){
+    ifstream rom(file, ios::in | ios::binary);
+    if(!rom.is_open()){
+        printf("Error: file can't be opened\n");
     }
 
-    for(int j = 0; j < 16; j++){
-        key[j] = 0;
-        stack[j] = 0;
-        v[j] = 0;
-    }
-
-    for(uint8_t c : memory){
-        c = 0;
-    }
-
-    ifstream rom(fileName.c_str(), ios::in | ios::binary);
     rom.seekg(0, rom.end);
     int size = rom.tellg();
     rom.seekg(0, rom.beg);
+    u8* code = new u8[size];
     rom.read((char*)code, size);
-    rom.close();
 
-    for(int j = 0; j < 80; j++) memory[j] = font[j];
-
-    for(int j = 0; j < size; j++){
-        memory[j + 0x200] = code[j];
+    for(auto& b : memory){
+        b = 0;
     }
+
+    for(int i = 0; i < size; i++){
+        memory[512 + i] = code[i];
+    }
+
+    delete[] code;
+
+    for(int i = 0; i < 80; i++){
+        memory[i] = font[i];
+    }
+
+    for(auto& p : gfx){
+        p = 0;
+    }
+
+    for(int i = 0; i < 16; i++){
+        keys[i] = v[i] = stack[i] = 0;
+    }
+
+    I = sp = dt = st = 0;
+    pc = 0x200;
+    drawFlag = false;
+    srand(time(NULL));
 }
 
-void Chip8::cycle(){
-    //Get opcode and some values
-    uint16_t opcode = memory[pc];
-    uint8_t x = (opcode >> 8) & 0xf, y = (opcode >> 4) & 0xf, kk = opcode >> 8;
-    uint16_t nnn = opcode & 0xfff;
+void Chip8::exec(){
+    u16 opcode = (memory[pc] << 8) | memory[pc + 1];
+    u8 x = (opcode >> 8) & 0xf, y = (opcode >> 4) & 0xf, kk = opcode & 0xff, n = opcode & 0xf;
+    u16 nnn = opcode & 0xfff;
 
-    //Switch all of these
     switch(opcode >> 12){
     case 0:
-        if(opcode == 0x00e0){
-            for(uint8_t p : vmem) p = 0;
-        }
-
-        else if(opcode == 0x00ee){
+        switch(kk){
+        case 0xe0:
+            printf("CLS\n");
+            for(auto& p : gfx){
+                p = 0;
+            }
+            pc += 2;
+            break;
+        case 0xee:
+            printf("RET\n");
             pc = stack[sp];
             sp--;
+            pc += 2;
+            break;
+        default:
+            printf("Bad op\n");
+            pc += 2;
+            break;
         }
         break;
     case 1:
+        printf("JP %04x\n", nnn);
         pc = nnn;
         break;
     case 2:
+        printf("CALL %04x\n", nnn);
         sp++;
         stack[sp] = pc;
         pc = nnn;
         break;
     case 3:
-        if(v[x] == kk) incPC();
+        printf("SE V%01x, %02x\n", x, kk);
+        if(v[x] == kk) pc += 2;
+        pc += 2;
         break;
     case 4:
-        if(v[x] != kk) incPC();
+        printf("SNE V%01x, %02x\n", x, kk);
+        if(v[x] != kk) pc += 2;
+        pc += 2;
         break;
     case 5:
-        if(v[x] == v[y]) incPC();
+        printf("SE V%01x, V%01x\n", x, y);
+        if(v[x] == v[y]) pc += 2;
+        pc += 2;
         break;
     case 6:
+        printf("LD V%01x, %02x\n", x, kk);
         v[x] = kk;
-        incPC();
+        pc += 2;
         break;
     case 7:
+        printf("ADD V%01x, %02x\n", x, kk);
         v[x] += kk;
-        incPC();
+        pc += 2;
         break;
     case 8:
-        switch(opcode & 0xf){
+        switch(n){
         case 0:
+            printf("LD V%01x, V%01x\n", x, y);
             v[x] = v[y];
-            incPC();
             break;
         case 1:
+            printf("OR V%01x, V%01x\n", x, y);
             v[x] |= v[y];
-            incPC();
             break;
         case 2:
+            printf("AND V%01x, V%01x\n", x, y);
             v[x] &= v[y];
-            incPC();
             break;
         case 3:
+            printf("XOR V%01x, V%01x\n", x, y);
             v[x] ^= v[y];
-            incPC();
             break;
         case 4:
-            if(v[x] + v[y] > 255) setF();
+            printf("ADD V%01x, V%01x\n", x, y);
+            if(v[x] + v[y] > 255) v[0xf] = 1;
             v[x] += v[y];
-            incPC();
             break;
         case 5:
-            if(v[y] < v[x]) setF();
+            printf("SUB V%01x, V%01x\n", x, y);
+            if(v[x] > v[y]) v[0xf] = 1;
             v[x] -= v[y];
-            incPC();
             break;
         case 6:
-            if(v[x] & 1 == 1) setF();
+            printf("SHR V%01x\n", x);
+            if(v[x] & 1) v[0xf] = 1;
             v[x] >>= 1;
-            incPC();
             break;
         case 7:
-            if(v[y] > v[x]) setF();
+            printf("SUBN V%01x, V%01x\n", x, y);
+            if(v[y] > v[x]) v[0xf] = 1;
             v[x] = v[y] - v[x];
-            incPC();
             break;
         case 0xe:
-            if((v[x] >> 7) & 1 == 1) setF();
+            printf("SHL V%01x\n", x);
+            if(v[x] & 0x80) v[0xf] = 1;
             v[x] <<= 1;
-            incPC();
+            break;
+        default:
+            printf("Bad op\n");
             break;
         }
+        pc += 2;
         break;
     case 9:
-        if(v[x] != v[y]) incPC();
+        printf("SNE V%01x, V%01x\n", x, y);
+        if(v[x] != v[y]) pc += 2;
+        pc += 2;
         break;
     case 0xa:
-        i = nnn;
-        incPC();
+        printf("LD I, %04x\n", nnn);
+        I = nnn;
+        pc += 2;
         break;
     case 0xb:
-        pc = nnn + v[0];
-        incPC();
+        printf("JP V0, %04x\n", nnn);
+        pc = v[0] + nnn;
         break;
     case 0xc:
-        v[x] = rand() & 0xff & kk;
-        incPC();
+        printf("RND V%01x, %02x\n", x, kk);
+        v[x] = rand() % 256 & kk;
+        pc += 2;
         break;
-    case 0xd:
+    case 0xd:{
+        printf("DRW V%01x, V%01x, %01x\n", x, y, n);
+        for (int yline = 0; yline < n; yline++)
         {
-            drawFlag = true;
-            uint8_t n = opcode & 0xf;
-            uint8_t sprite[n];
-            for(int j = 0; j < n; j++) sprite[j] = memory[i + j];
-            for(int sy = v[y]; sy < n; sy++){
-                for(int sx = v[x]; sx < 8; sx++){
-                    uint8_t pixel = memory[sy] >> sx & 1;
-                    if(vmem[sy * 64 + sx] ^= pixel == 0) setF();
-                    vmem[sy * 64 + sx] ^= pixel;
+            u8 pixel = memory[I + yline];
+            for(int xline = 0; xline < 8; xline++)
+            {
+                if((pixel & (0x80 >> xline)) != 0)
+                {
+                    if(gfx[(v[x] + xline + ((v[y] + yline) * 64))] == 1)
+                    {
+                        v[0xF] = 1;
+                    }
+                    gfx[v[x] + xline + ((v[y] + yline) * 64)] ^= 1;
                 }
             }
-            incPC();
         }
-
+        }
+        drawFlag = true;
+        pc += 2;
         break;
     case 0xe:
-        if(opcode & 0xff == 0x9e){
-            if(key[v[x]] == 1) incPC();
+        switch(kk){
+        case 0x9e:
+            printf("SKP V%01x\n", x);
+            if(keys[v[x]]) pc += 2;
+            break;
+        case 0xa1:
+            printf("SKNP V%01x\n", x);
+            if(!keys[v[x]]) pc += 2;
+            break;
+        default:
+            printf("Bad op\n");
+            break;
         }
-        else if(opcode & 0xff == 0xa1){
-            if(key[v[x]] == 0) incPC();
-        }
+        pc += 2;
         break;
     case 0xf:
-        switch(opcode & 0xff){
+        switch(kk){
         case 7:
+            printf("LD V%01x, DT\n", x);
             v[x] = dt;
-            incPC();
             break;
-        case 0xa: //Compiler doesn't like new vars in cases, use {} block
-            {bool press = false;
-            for(uint8_t k : key){
-                if(k == 1) press = true;
+        case 0xa:{
+            printf("LD V%01x, K\n", x);
+            bool pressed;
+            for(int i = 0; i < 16; i++){
+                if(keys[i]){
+                    pressed = true;
+                    v[x] = i;
+                }
             }
-
-            if(!press){
-                return;
-            }
-            else{
-                incPC();
-            }
-            }
-            break;
+            if(!pressed) return;
+        }
+        break;
         case 0x15:
+            printf("LD DT, V%01x\n", x);
             dt = v[x];
-            incPC();
             break;
         case 0x18:
+            printf("LD ST, V%01x\n", x);
             st = v[x];
-            incPC();
             break;
         case 0x1e:
-            i += v[x];
-            incPC();
+            printf("ADD I, V%01x\n", x);
+            I += v[x];
             break;
         case 0x29:
-            {uint16_t sprPos = v[x] * 5; //size of font is 5 bytes
-            i = sprPos;
-            incPC();}
+            printf("LD F, V%01x\n", x);
+            I = 5 * v[x];
             break;
         case 0x33:
-            memory[i] = v[x] / 100;
-            memory[i + 1] = v[x] / 10;
-            memory[i + 2] = v[x] % 10;
-            incPC();
+            printf("LD B, V%01x\n", x);
+            memory[I] = v[x] / 100;
+            memory[I + 1] = v[x] / 10;
+            memory[I + 2] = v[x] % 10;
             break;
         case 0x55:
-            for(int j = 0; j < 16; j++){
-                memory[i + j] = v[j];
+            printf("LD [I], V%01x\n", x);
+            for(int i = 0; i <= x; i++){
+                v[i] = memory[I + i];
             }
-            incPC();
             break;
         case 0x65:
-            for(int j = 0; j < 16; j++){
-                v[j] = memory[i + j];
+            printf("LD V%01x, [I]\n", x);
+            for(int i = 0; i <= x; i++){
+                v[i] = memory[I + i];
             }
-            incPC();
+            break;
+        default:
+            printf("Bad op\n");
             break;
         }
+        pc += 2;
+        break;
+    default:
+        printf("Bad op\n");
+        pc += 2;
+        break;
     }
-}
 
-void Chip8::incPC(){
-    pc += 2;
-}
-
-//Set and unset VF
-void Chip8::setF(){
-    v[15] = 1;
-}
-
-void Chip8::unsetF(){
-    v[15] = 0;
+    if(dt > 0) dt--;
+    if(st > 0) st--;
 }
